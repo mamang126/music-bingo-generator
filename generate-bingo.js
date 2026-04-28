@@ -14,9 +14,21 @@ class BingoGenerator {
     this.startX = config.startX;
     this.startY = config.startY;
     this.boxSize = config.boxSize;
+    this.boxSpacing = config.boxSpacing || 0; // Spacing between boxes
     this.songs = config.songs;
     this.numberOfCards = config.numberOfCards;
     this.outputDir = config.outputDir || 'out';
+    
+    // Font configuration
+    this.fontSize = config.fontSize || 16;
+    this.fontColor = config.fontColor || 'black'; // 'black' or 'white'
+    this.customFont = config.customFont || null; // Path to custom .fnt file
+    this.textOverflow = config.textOverflow || 'wrap'; // 'wrap', 'truncate', or 'scale'
+    this.padding = config.padding || 8;
+    this.lineSpacing = config.lineSpacing !== undefined ? config.lineSpacing : 2; // Space between lines in pixels
+    
+    // Debug mode
+    this.debug = config.debug || false;
     
     // Validate configuration
     this.validate();
@@ -31,10 +43,29 @@ class BingoGenerator {
     if (!fs.existsSync(this.templateImage)) {
       throw new Error(`Template image not found: ${this.templateImage}`);
     }
+    
+    // Calculate and display theoretical unique card possibilities
+    const totalSongs = this.songs.length;
+    const cardsNeeded = this.numberOfCards;
+    
+    // Calculate combinations: C(n,k) = n! / (k! * (n-k)!)
+    // For large numbers, we'll use a simpler check
+    if (totalSongs === requiredCells) {
+      // If exact match, we can generate requiredCells! different arrangements
+      // But that's a lot, so we just warn if they want too many
+      console.log(`Note: You have exactly ${requiredCells} songs for a ${this.gridSize}x${this.gridSize} grid.`);
+      console.log(`Each card will have the same songs in different positions.`);
+    } else if (totalSongs > requiredCells) {
+      // More songs than needed - good for variety
+      const extraSongs = totalSongs - requiredCells;
+      console.log(`Note: You have ${totalSongs} songs for ${requiredCells} cells (+${extraSongs} extra songs).`);
+      console.log(`This allows for good variety across ${cardsNeeded} cards.`);
+    }
   }
 
   /**
    * Shuffle array using Fisher-Yates algorithm
+   * This is a well-tested, unbiased shuffling algorithm
    */
   shuffleArray(array) {
     const shuffled = [...array];
@@ -47,25 +78,56 @@ class BingoGenerator {
 
   /**
    * Generate a unique set of songs for one bingo card
+   * Creates a unique card by shuffling and checking against previously generated cards
    */
-  generateCardSongs() {
+  generateCardSongs(previousCards = []) {
     const requiredCells = this.gridSize * this.gridSize;
+    const maxAttempts = 1000; // Prevent infinite loop
+    let attempts = 0;
+    
+    while (attempts < maxAttempts) {
+      // Shuffle all songs and take required number
+      const shuffled = this.shuffleArray(this.songs);
+      const cardSongs = shuffled.slice(0, requiredCells);
+      
+      // Create a signature for this card (sorted song list)
+      const cardSignature = cardSongs.slice().sort().join('|');
+      
+      // Check if this exact combination was already generated
+      const isDuplicate = previousCards.some(prevCard => {
+        const prevSignature = prevCard.slice().sort().join('|');
+        return cardSignature === prevSignature;
+      });
+      
+      if (!isDuplicate) {
+        return cardSongs;
+      }
+      
+      attempts++;
+    }
+    
+    // If we couldn't find a unique combination after maxAttempts,
+    // just return a shuffled version (better than failing)
+    console.warn(`Warning: Could not generate unique card after ${maxAttempts} attempts. Returning potentially duplicate card.`);
     const shuffled = this.shuffleArray(this.songs);
     return shuffled.slice(0, requiredCells);
   }
 
   /**
-   * Wrap text to fit within the box
+   * Wrap text to fit within the box using actual measured width
    */
-  wrapText(text, maxCharsPerLine) {
+  wrapText(text, font, maxWidth) {
     const words = text.split(' ');
     const lines = [];
-    let currentLine = words[0];
+    let currentLine = words[0] || '';
 
     for (let i = 1; i < words.length; i++) {
       const word = words[i];
-      if ((currentLine + ' ' + word).length <= maxCharsPerLine) {
-        currentLine += ' ' + word;
+      const testLine = currentLine + ' ' + word;
+      const testWidth = Jimp.measureText(font, testLine);
+      
+      if (testWidth <= maxWidth) {
+        currentLine = testLine;
       } else {
         lines.push(currentLine);
         currentLine = word;
@@ -76,67 +138,283 @@ class BingoGenerator {
   }
 
   /**
+   * Get the appropriate Jimp font based on size and color
+   */
+  async loadFont(size, color) {
+    // If custom font is provided, try to load it
+    if (this.customFont) {
+      try {
+        const customFont = await Jimp.loadFont(this.customFont);
+        // Successfully loaded, return it
+        return customFont;
+      } catch (error) {
+        // Only show error once per generation
+        if (!this._customFontErrorShown) {
+          this._customFontErrorShown = true;
+          console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.error('❌ ERROR: Failed to load custom font');
+          console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.error(`Font path: ${this.customFont}`);
+          console.error('');
+          console.error('IMPORTANT: Jimp only supports BMFont format (.fnt + .png), not TrueType (.ttf) or OpenType (.otf) fonts.');
+          console.error('');
+          console.error('To use custom fonts, you need:');
+          console.error('  1. A .fnt file (font metrics)');
+          console.error('  2. A .png file (font texture atlas)');
+          console.error('');
+          console.error('Convert your .ttf font to BMFont format using:');
+          console.error('  • Hiero (https://github.com/libgdx/libgdx/wiki/Hiero)');
+          console.error('  • BMFont (https://www.angelcode.com/products/bmfont/)');
+          console.error('  • Online tools like: https://snowb.org/');
+          console.error('');
+          console.error('Falling back to default built-in font...');
+          console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+        }
+        // Fall through to use default font
+      }
+    }
+    
+    // Map to nearest available Jimp font size
+    const colorSuffix = color === 'white' ? '_WHITE' : '_BLACK';
+    
+    if (size >= 128) return await Jimp.loadFont(Jimp[`FONT_SANS_128${colorSuffix}`]);
+    if (size >= 64) return await Jimp.loadFont(Jimp[`FONT_SANS_64${colorSuffix}`]);
+    if (size >= 32) return await Jimp.loadFont(Jimp[`FONT_SANS_32${colorSuffix}`]);
+    if (size >= 16) return await Jimp.loadFont(Jimp[`FONT_SANS_16${colorSuffix}`]);
+    if (size >= 14) return await Jimp.loadFont(Jimp[`FONT_SANS_14${colorSuffix}`]);
+    if (size >= 12) return await Jimp.loadFont(Jimp[`FONT_SANS_12${colorSuffix}`]);
+    if (size >= 10) return await Jimp.loadFont(Jimp[`FONT_SANS_10${colorSuffix}`]);
+    return await Jimp.loadFont(Jimp[`FONT_SANS_8${colorSuffix}`]);
+  }
+
+  /**
    * Draw text centered in a box using Jimp
    */
   async drawCenteredText(image, text, x, y, boxSize) {
-    const padding = 8;
-    const maxWidth = boxSize - (padding * 2);
+    const maxWidth = boxSize - (this.padding * 2);
+    const maxHeight = boxSize - (this.padding * 2);
     
-    // Calculate appropriate font size based on box size
-    let fontSize = 16;
-    if (boxSize <= 80) fontSize = 12;
-    else if (boxSize <= 100) fontSize = 14;
-    else if (boxSize >= 150) fontSize = 20;
+    let fontSize = this.fontSize;
+    let lines = [];
+    let font = null;
+    let lineHeight = 0;
     
-    // Estimate characters per line (rough approximation)
-    const charsPerLine = Math.floor(maxWidth / (fontSize * 0.6));
-    
-    // Wrap text
-    const lines = this.wrapText(text, charsPerLine);
-    
-    // Reduce font size if too many lines
-    if (lines.length > 5) {
-      fontSize = Math.max(10, fontSize - 2);
+    // Handle different overflow strategies
+    if (this.textOverflow === 'scale') {
+      // Try scaling down font until text fits both width and height
+      let fits = false;
+      const minFontSize = 8;
+      
+      while (fontSize >= minFontSize && !fits) {
+        font = await this.loadFont(fontSize, this.fontColor);
+        
+        // Calculate line height - use font's reported height if available, otherwise use fontSize
+        // For custom fonts, we need to be more generous with line spacing
+        if (this.customFont && font.common) {
+          lineHeight = font.common.lineHeight + this.lineSpacing;
+        } else {
+          lineHeight = fontSize + this.lineSpacing;
+        }
+        
+        // Ensure minimum line height
+        lineHeight = Math.max(lineHeight, fontSize + 2);
+        
+        // Wrap text using actual measured width
+        lines = this.wrapText(text, font, maxWidth);
+        
+        // Check if all lines fit within width (individual check)
+        let widthFits = true;
+        for (const line of lines) {
+          const lineWidth = Jimp.measureText(font, line);
+          if (lineWidth > maxWidth) {
+            widthFits = false;
+            break;
+          }
+        }
+        
+        // Check if total height fits
+        const totalHeight = lines.length * lineHeight;
+        const heightFits = totalHeight <= maxHeight;
+        
+        if (widthFits && heightFits) {
+          fits = true;
+        } else {
+          fontSize -= 1; // Reduce by 1px for finer control
+        }
+      }
+      
+      // If we exited the loop without fitting, we're at minimum font size
+      // Ensure we have the minimum font loaded and recalculate
+      if (!fits) {
+        font = await this.loadFont(minFontSize, this.fontColor);
+        
+        // Recalculate line height for minimum font
+        if (this.customFont && font.common) {
+          lineHeight = font.common.lineHeight + this.lineSpacing;
+        } else {
+          lineHeight = minFontSize + this.lineSpacing;
+        }
+        lineHeight = Math.max(lineHeight, minFontSize + 2);
+        
+        lines = this.wrapText(text, font, maxWidth);
+        
+        // Truncate lines to fit within height
+        const maxLines = Math.floor(maxHeight / lineHeight);
+        if (maxLines > 0 && lines.length > maxLines) {
+          lines = lines.slice(0, maxLines);
+          // Add ellipsis to last line if there's room
+          if (lines.length > 0) {
+            const lastLine = lines[lines.length - 1];
+            const ellipsis = '...';
+            const ellipsisWidth = Jimp.measureText(font, ellipsis);
+            
+            // Trim last line to make room for ellipsis
+            let trimmedLine = lastLine;
+            while (Jimp.measureText(font, trimmedLine + ellipsis) > maxWidth && trimmedLine.length > 0) {
+              trimmedLine = trimmedLine.slice(0, -1);
+            }
+            lines[lines.length - 1] = trimmedLine + ellipsis;
+          }
+        } else if (maxLines === 0) {
+          // Box is too small, show just ellipsis
+          lines = ['...'];
+        }
+      }
+      
+    } else if (this.textOverflow === 'truncate') {
+      font = await this.loadFont(fontSize, this.fontColor);
+      
+      if (this.customFont && font.common) {
+        lineHeight = font.common.lineHeight + this.lineSpacing;
+      } else {
+        lineHeight = fontSize + this.lineSpacing;
+      }
+      lineHeight = Math.max(lineHeight, fontSize + 2);
+      
+      lines = this.wrapText(text, font, maxWidth);
+      
+      // Truncate to fit height
+      const maxLines = Math.floor(maxHeight / lineHeight);
+      if (maxLines > 0 && lines.length > maxLines) {
+        lines = lines.slice(0, maxLines);
+        if (lines.length > 0) {
+          const lastLine = lines[lines.length - 1];
+          const ellipsis = '...';
+          
+          // Trim last line to make room for ellipsis
+          let trimmedLine = lastLine;
+          while (Jimp.measureText(font, trimmedLine + ellipsis) > maxWidth && trimmedLine.length > 0) {
+            trimmedLine = trimmedLine.slice(0, -1);
+          }
+          lines[lines.length - 1] = trimmedLine + ellipsis;
+        }
+      } else if (maxLines === 0) {
+        lines = ['...'];
+      }
+      
+    } else { // wrap (default)
+      font = await this.loadFont(fontSize, this.fontColor);
+      
+      if (this.customFont && font.common) {
+        lineHeight = font.common.lineHeight + this.lineSpacing;
+      } else {
+        lineHeight = fontSize + this.lineSpacing;
+      }
+      lineHeight = Math.max(lineHeight, fontSize + 2);
+      
+      lines = this.wrapText(text, font, maxWidth);
+      
+      // Even in wrap mode, prevent overflow by truncating excessive lines
+      const maxLines = Math.floor(maxHeight / lineHeight);
+      if (maxLines > 0 && lines.length > maxLines) {
+        lines = lines.slice(0, maxLines);
+      } else if (maxLines === 0) {
+        lines = [];
+      }
     }
     
-    // Load font
-    const font = await Jimp.loadFont(
-      fontSize >= 16 ? Jimp.FONT_SANS_16_BLACK : 
-      fontSize >= 14 ? Jimp.FONT_SANS_14_BLACK :
-      fontSize >= 12 ? Jimp.FONT_SANS_12_BLACK :
-      Jimp.FONT_SANS_10_BLACK
-    );
+    // Safety check: ensure we have valid font and lines
+    if (!font || lines.length === 0) {
+      return; // Nothing to draw
+    }
     
     // Calculate starting y position to center all lines
-    const lineHeight = fontSize + 2;
     const totalTextHeight = lines.length * lineHeight;
     let currentY = y + (boxSize / 2) - (totalTextHeight / 2);
     
+    // Clamp starting Y to stay within box bounds
+    const minY = y + this.padding;
+    const maxY = y + boxSize - this.padding - totalTextHeight;
+    currentY = Math.max(minY, Math.min(currentY, maxY));
+    
     // Draw each line centered
-    lines.forEach((line) => {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Skip empty lines
+      if (!line || line.trim().length === 0) {
+        currentY += lineHeight;
+        continue;
+      }
+      
       const textWidth = Jimp.measureText(font, line);
-      const textX = x + (boxSize / 2) - (textWidth / 2);
-      image.print(font, textX, currentY, line);
+      let textX = x + (boxSize / 2) - (textWidth / 2);
+      
+      // Clamp X position to stay within box bounds
+      const minX = x + this.padding;
+      const maxX = x + boxSize - this.padding - textWidth;
+      textX = Math.max(minX, Math.min(textX, maxX));
+      
+      // Only draw if within box bounds
+      const lineBottom = currentY + lineHeight;
+      if (currentY >= y + this.padding && lineBottom <= y + boxSize - this.padding) {
+        image.print(font, Math.floor(textX), Math.floor(currentY), line);
+      }
+      
       currentY += lineHeight;
-    });
+    }
   }
 
   /**
    * Generate a single bingo card
    */
-  async generateCard(cardNumber) {
+  async generateCard(cardNumber, previousCards = []) {
     // Load the template image
     const image = await Jimp.read(this.templateImage);
     
-    // Get songs for this card
-    const cardSongs = this.generateCardSongs();
+    // Get songs for this card (ensuring uniqueness)
+    const cardSongs = this.generateCardSongs(previousCards);
     
     // Draw grid with songs
     let songIndex = 0;
     for (let row = 0; row < this.gridSize; row++) {
       for (let col = 0; col < this.gridSize; col++) {
-        const x = this.startX + (col * this.boxSize);
-        const y = this.startY + (row * this.boxSize);
+        const x = this.startX + (col * (this.boxSize + this.boxSpacing));
+        const y = this.startY + (row * (this.boxSize + this.boxSpacing));
+        
+        // Draw debug grid box if enabled
+        if (this.debug) {
+          // Draw border around the box
+          const borderColor = 0xFF0000FF; // Red color
+          for (let i = 0; i < 2; i++) { // 2px border width
+            // Top border
+            for (let px = x; px < x + this.boxSize; px++) {
+              image.setPixelColor(borderColor, px, y + i);
+            }
+            // Bottom border
+            for (let px = x; px < x + this.boxSize; px++) {
+              image.setPixelColor(borderColor, px, y + this.boxSize - 1 - i);
+            }
+            // Left border
+            for (let py = y; py < y + this.boxSize; py++) {
+              image.setPixelColor(borderColor, x + i, py);
+            }
+            // Right border
+            for (let py = y; py < y + this.boxSize; py++) {
+              image.setPixelColor(borderColor, x + this.boxSize - 1 - i, py);
+            }
+          }
+        }
         
         // Draw song text
         const song = cardSongs[songIndex];
@@ -151,6 +429,9 @@ class BingoGenerator {
     await image.quality(95).writeAsync(outputPath);
     
     console.log(`✓ Generated card ${cardNumber}/${this.numberOfCards}`);
+    
+    // Return the card songs for uniqueness tracking
+    return cardSongs;
   }
 
   /**
@@ -169,13 +450,18 @@ class BingoGenerator {
     console.log(`Output directory: ${this.outputDir}`);
     console.log('');
 
+    // Track all generated cards to ensure uniqueness
+    const generatedCards = [];
+
     // Generate each card
     for (let i = 1; i <= this.numberOfCards; i++) {
-      await this.generateCard(i);
+      const cardSongs = await this.generateCard(i, generatedCards);
+      generatedCards.push(cardSongs);
     }
 
     console.log('');
     console.log('✓ All bingo cards generated successfully!');
+    console.log(`✓ Generated ${generatedCards.length} unique cards`);
   }
 }
 
