@@ -730,12 +730,18 @@ async function generatePDF(outputDir, pdfFileName = 'bingo-cards.pdf', config = 
   const cellWidth = (availableWidth - totalHorizontalSpacing) / gridCols;
   const cellHeight = (availableHeight - totalVerticalSpacing) / gridRows;
 
-  // Images will fill cells completely (no aspect ratio preservation to avoid margins)
-  const scaledWidth = cellWidth;
-  const scaledHeight = cellHeight;
+  // Calculate scaled dimensions maintaining aspect ratio
+  const aspectRatio = imgWidth / imgHeight;
+  let scaledWidth = cellWidth;
+  let scaledHeight = scaledWidth / aspectRatio;
+
+  if (scaledHeight > cellHeight) {
+    scaledHeight = cellHeight;
+    scaledWidth = scaledHeight * aspectRatio;
+  }
 
   console.log(`   Layout: ${gridCols}x${gridRows} grid (${maxImagesPerPage} cards per page)`);
-  console.log(`   Card size on page: ${Math.round(scaledWidth)}x${Math.round(scaledHeight)} pts`);
+  console.log(`   Card size on page: ${Math.round(scaledWidth)}x${Math.round(scaledHeight)} pts (aspect ratio preserved)`);
 
   // Create PDF
   const pdfPath = path.join(outputDir, pdfFileName);
@@ -759,9 +765,9 @@ async function generatePDF(outputDir, pdfFileName = 'bingo-cards.pdf', config = 
       for (let col = 0; col < bestLayout.cols; col++) {
         if (imageIndex >= files.length) break;
 
-        // Place images directly at cell positions (no centering)
-        const x = margin + col * (cellWidth + spacing);
-        const y = margin + row * (cellHeight + spacing);
+        // Place images directly adjacent (no spacing between them)
+        const x = margin + col * scaledWidth;
+        const y = margin + row * scaledHeight;
 
         const imagePath = path.join(outputDir, files[imageIndex]);
         doc.image(imagePath, x, y, {
