@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const Jimp = require('jimp');
 const sharp = require('sharp');
+const PDFDocument = require('pdfkit');
 
 /**
  * Music Bingo Generator
@@ -641,6 +642,152 @@ class BingoGenerator {
 }
 
 /**
+ * Generate a PDF with all images from the output directory
+ * @param {string} outputDir - Output directory containing images
+ * @param {string} pdfFileName - Name of the PDF file
+ * @param {object} config - Configuration object with PDF settings
+ */
+async function generatePDF(outputDir, pdfFileName = 'bingo-cards.pdf', config = {}) {
+  console.log('\n📄 Generating PDF with all bingo cards...');
+  
+  // Get all JPG files from output directory
+  const files = fs.readdirSync(outputDir)
+    .filter(file => file.toLowerCase().endsWith('.jpg'))
+    .sort((a, b) => {
+      // Natural sort: 1.jpg, 2.jpg, ..., 10.jpg, 11.jpg
+      const numA = parseInt(path.parse(a).name);
+      const numB = parseInt(path.parse(b).name);
+      return numA - numB;
+    });
+
+  if (files.length === 0) {
+    console.error('❌ No JPG files found in output directory');
+    return;
+  }
+
+  console.log(`   Found ${files.length} bingo card(s)`);
+
+  // Read first image to get dimensions
+  const firstImagePath = path.join(outputDir, files[0]);
+  const firstImage = await Jimp.read(firstImagePath);
+  const imgWidth = firstImage.bitmap.width;
+  const imgHeight = firstImage.bitmap.height;
+
+  console.log(`   Image size: ${imgWidth}x${imgHeight}px`);
+
+  // Parse PDF configuration
+  const pdfPageSize = config.pdfPageSize || 'A3';
+  const gridCols = config.pdfGridCols || 1;
+  const gridRows = config.pdfGridRows || 1;
+  const pdfLandscape = config.pdfLandscape || false;
+  const margin = 0;
+  const spacing = 0;
+
+  // Get page dimensions based on size
+  let pageWidth, pageHeight;
+  const pageSizes = {
+    'A0': [2383.94, 3370.39],
+    'A1': [1683.78, 2383.94],
+    'A2': [1190.55, 1683.78],
+    'A3': [841.89, 1190.55],
+    'A4': [595.28, 841.89],
+    'A5': [419.53, 595.28],
+    'LETTER': [612, 792],
+    'LEGAL': [612, 1008]
+  };
+
+  if (Array.isArray(pdfPageSize) && pdfPageSize.length === 2) {
+    // Custom size [width, height] in points
+    [pageWidth, pageHeight] = pdfPageSize;
+    console.log(`   Page size: Custom ${pageWidth}x${pageHeight} pts`);
+  } else if (pageSizes[pdfPageSize.toUpperCase()]) {
+    [pageWidth, pageHeight] = pageSizes[pdfPageSize.toUpperCase()];
+    console.log(`   Page size: ${pdfPageSize.toUpperCase()} (${Math.round(pageWidth)}x${Math.round(pageHeight)} pts)`);
+  } else {
+    // Default to A3
+    [pageWidth, pageHeight] = pageSizes['A3'];
+    console.log(`   Page size: A3 (default)`);
+  }
+
+  // Apply landscape orientation (swap width and height)
+  if (pdfLandscape) {
+    [pageWidth, pageHeight] = [pageHeight, pageWidth];
+    console.log(`   Orientation: Landscape`);
+  }
+
+  // Calculate available space
+  const availableWidth = pageWidth - (2 * margin);
+  const availableHeight = pageHeight - (2 * margin);
+
+  // Use configured grid layout
+  const bestLayout = { cols: gridCols, rows: gridRows };
+  const maxImagesPerPage = gridCols * gridRows;
+
+  // Calculate image dimensions to fit in grid
+  const totalHorizontalSpacing = spacing * (gridCols - 1);
+  const totalVerticalSpacing = spacing * (gridRows - 1);
+  
+  const cellWidth = (availableWidth - totalHorizontalSpacing) / gridCols;
+  const cellHeight = (availableHeight - totalVerticalSpacing) / gridRows;
+
+  // Images will fill cells completely (no aspect ratio preservation to avoid margins)
+  const scaledWidth = cellWidth;
+  const scaledHeight = cellHeight;
+
+  console.log(`   Layout: ${gridCols}x${gridRows} grid (${maxImagesPerPage} cards per page)`);
+  console.log(`   Card size on page: ${Math.round(scaledWidth)}x${Math.round(scaledHeight)} pts`);
+
+  // Create PDF
+  const pdfPath = path.join(outputDir, pdfFileName);
+  const doc = new PDFDocument({
+    size: [pageWidth, pageHeight],
+    margin: 0,
+    autoFirstPage: false
+  });
+
+  const stream = fs.createWriteStream(pdfPath);
+  doc.pipe(stream);
+
+  // Add images to PDF
+  let imageIndex = 0;
+  const totalPages = Math.ceil(files.length / maxImagesPerPage);
+
+  for (let pageNum = 0; pageNum < totalPages; pageNum++) {
+    doc.addPage();
+
+    for (let row = 0; row < bestLayout.rows; row++) {
+      for (let col = 0; col < bestLayout.cols; col++) {
+        if (imageIndex >= files.length) break;
+
+        // Place images directly at cell positions (no centering)
+        const x = margin + col * (cellWidth + spacing);
+        const y = margin + row * (cellHeight + spacing);
+
+        const imagePath = path.join(outputDir, files[imageIndex]);
+        doc.image(imagePath, x, y, {
+          width: scaledWidth,
+          height: scaledHeight
+        });
+
+        imageIndex++;
+      }
+      if (imageIndex >= files.length) break;
+    }
+  }
+
+  doc.end();
+
+  // Wait for PDF to be written
+  await new Promise((resolve, reject) => {
+    stream.on('finish', resolve);
+    stream.on('error', reject);
+  });
+
+  console.log(`✓ PDF generated: ${pdfPath}`);
+  console.log(`✓ Total pages: ${totalPages}`);
+}
+
+/**
  * Main execution
  */
 async function main() {
@@ -662,6 +809,9 @@ async function main() {
     // Create generator and run
     const generator = new BingoGenerator(config);
     await generator.generate();
+
+    // Generate PDF with all cards
+    await generatePDF(config.outputDir || 'out', 'bingo-cards.pdf', config);
 
   } catch (error) {
     console.error('Error:', error.message);

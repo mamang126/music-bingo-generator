@@ -78,6 +78,41 @@ Create a `config.json` file with your settings:
 - **lineSpacing** (number): Space between text lines in pixels (default: 2)
 - **debug** (boolean): Draw red borders around grid boxes for alignment testing (default: false)
 
+**PDF Generation Settings:**
+- **pdfPageSize** (string|array): PDF page size (default: "A3")
+  - Standard sizes: "A0", "A1", "A2", "A3", "A4", "A5", "LETTER", "LEGAL"
+  - Custom size: `[width, height]` in points (e.g., `[1200, 1600]`)
+- **pdfGridCols** (number): Number of columns in PDF grid (default: 1)
+- **pdfGridRows** (number): Number of rows in PDF grid (default: 1)
+- **pdfLandscape** (boolean): Use landscape orientation (default: false)
+
+**Examples:**
+```json
+// 1 full-size card per A3 page
+{
+  "pdfPageSize": "A3",
+  "pdfGridCols": 1,
+  "pdfGridRows": 1,
+  "pdfLandscape": false
+}
+
+// 4 cards per A4 page (2x2 grid) in landscape
+{
+  "pdfPageSize": "A4",
+  "pdfGridCols": 2,
+  "pdfGridRows": 2,
+  "pdfLandscape": true
+}
+
+// Custom page size with 3x3 grid
+{
+  "pdfPageSize": [1200, 1600],
+  "pdfGridCols": 3,
+  "pdfGridRows": 3,
+  "pdfLandscape": false
+}
+```
+
 ### 3. Run the Generator
 
 ```bash
@@ -92,7 +127,9 @@ npm start
 
 ### 4. Find Your Bingo Cards
 
-Check the `out` folder for your generated cards: `1.jpg`, `2.jpg`, `3.jpg`, etc.
+Check the `out` folder for your generated cards:
+- **Individual cards**: `1.jpg`, `2.jpg`, `3.jpg`, etc.
+- **Combined PDF**: `bingo-cards.pdf` (contains all cards in the configured grid layout)
 
 ## How to Determine Grid Position
 
