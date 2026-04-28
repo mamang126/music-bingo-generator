@@ -1,0 +1,20 @@
+{
+    "name": "music-bingo-generator",
+    "version": "1.0.0",
+    "description": "Generate music bingo cards from a template image and song list",
+    "main": "generate-bingo.js",
+    "scripts": {
+        "start": "node generate-bingo.js",
+        "test": "node generate-bingo.js --config config.example.json"
+    },
+    "keywords": [
+        "bingo",
+        "music",
+        "generator"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "jimp": "^0.22.10"
+    }
+}

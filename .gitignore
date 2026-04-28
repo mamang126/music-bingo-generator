@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Output files
+out/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Config (if you want to keep it private)
+config.json
