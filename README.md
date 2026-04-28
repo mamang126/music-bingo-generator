@@ -67,9 +67,9 @@ Create a `config.json` file with your settings:
 **Optional Settings:**
 - **numberOfCards** (number): How many unique bingo cards to generate (default: 10)
 - **outputDir** (string): Output folder name (default: "out")
-- **fontSize** (number): Font size in pixels (default: 16). Available sizes: 8, 10, 12, 14, 16, 32, 64, 128
+- **fontSize** (number): Font size in pixels (default: 16). For built-in fonts: 8, 10, 12, 14, 16, 32, 64, 128. For custom TTF: any size (will be converted automatically)
 - **fontColor** (string): Font color - "black" or "white" (default: "black")
-- **customFont** (string|null): Path to custom BMFont .fnt file (default: null). **Must be BMFont format (.fnt), NOT .ttf**
+- **customFont** (string|null): Path to font file - can be .fnt (BMFont) or .ttf (auto-converted). Examples: `"./fonts/Poppins.ttf"` or `"./fonts/Poppins-60.fnt"`
 - **textOverflow** (string): How to handle text that doesn't fit (default: "scale")
   - "scale": Automatically reduce font size until text fits
   - "wrap": Wrap text across multiple lines (may overflow box)
@@ -223,33 +223,110 @@ Wraps text without reducing font size. If too many lines, excess lines are trunc
 
 **Important:** Jimp only supports **BMFont format**, not TrueType (.ttf) or OpenType (.otf) fonts.
 
-To use a custom font:
+**⚠️ Font Size Limitation:** BMFont files have a **fixed size** that's set when you generate them. The `fontSize` config option **does not apply** to custom fonts. To use different sizes, you need to generate separate .fnt files at each size you want.
 
-1. **Convert your font to BMFont format** using one of these tools:
-   - **Hiero** - https://github.com/libgdx/libgdx/wiki/Hiero (free, cross-platform)
-   - **BMFont** - https://www.angelcode.com/products/bmfont/ (Windows)
-   - **Online converter** - https://snowb.org/ (web-based)
+**✨ NEW: Auto-Conversion!** You can now specify a `.ttf` file directly in your config, and it will be **automatically converted** to BMFont format at the specified `fontSize`:
 
-2. **Place both files in your project:**
-   - `custom-font.fnt` (font metrics)
-   - `custom-font.png` (font texture atlas)
+```json
+{
+  "customFont": "./fonts/Poppins.ttf",
+  "fontSize": 60
+}
+```
 
-3. **Reference the .fnt file in config:**
-   ```json
-   {
-     "customFont": "./fonts/custom-font.fnt"
-   }
-   ```
+When you run the generator:
+1. It detects the .ttf file
+2. Automatically converts it to `Poppins-60.fnt` (using your fontSize)
+3. Uses the converted font for your bingo cards
+4. Saves the .fnt file so it doesn't reconvert next time
 
-**Note:** The .png file must be in the same directory as the .fnt file with the same base name.
+**Manual Conversion (Optional):** If you want more control or multiple sizes, use the font converter:
 
-**Alternative:** If you don't need custom fonts, use the built-in fonts by setting:
+```bash
+node convert-font.js Poppins.ttf 40,50,60,70,80
+```
+
+Then reference the size you want:
+```json
+{
+  "customFont": "./fonts/Poppins-60.fnt"
+}
+```
+
+**For Dynamic Font Sizing:** Use the built-in fonts instead:
 ```json
 {
   "customFont": null,
-  "fontSize": 16,
+  "fontSize": 54,
   "fontColor": "black"
 }
+```
+
+Built-in fonts allow the `fontSize` config to work and will automatically scale down for long text when using `"textOverflow": "scale"`.
+
+## Font Converter Tool
+
+We've included a **font converter script** that automatically converts TTF fonts to BMFont format at multiple sizes!
+
+### Quick Start:
+
+1. **Install dependencies** (includes font converter tools):
+   ```bash
+   npm install
+   ```
+
+2. **Convert your TTF font:**
+   ```bash
+   node convert-font.js YourFont.ttf
+   ```
+
+   This creates BMFont files at sizes 16, 32, 48, and 64px in the `fonts` folder.
+
+3. **Custom sizes:**
+   ```bash
+   node convert-font.js YourFont.ttf 20,40,60,80
+   ```
+
+4. **Custom output folder:**
+   ```bash
+   node convert-font.js YourFont.ttf 16,32,48,64 ./my-fonts
+   ```
+
+### Full Usage:
+
+```bash
+node convert-font.js <ttf-file> [sizes] [output-dir]
+```
+
+**Arguments:**
+- `<ttf-file>` - Path to your .ttf font file (required)
+- `[sizes]` - Comma-separated list of font sizes (default: 16,32,48,64)
+- `[output-dir]` - Where to save the converted fonts (default: ./fonts)
+
+### Example Workflow:
+
+```bash
+# Convert Poppins font at multiple sizes for your bingo cards
+node convert-font.js Poppins.ttf 30,40,50,60,70
+
+# This creates:
+# fonts/Poppins-30.fnt + fonts/Poppins-30.png
+# fonts/Poppins-40.fnt + fonts/Poppins-40.png
+# fonts/Poppins-50.fnt + fonts/Poppins-50.png
+# fonts/Poppins-60.fnt + fonts/Poppins-60.png
+# fonts/Poppins-70.fnt + fonts/Poppins-70.png
+
+# Then use in config.json:
+{
+  "customFont": "./fonts/Poppins-60.fnt"
+}
+```
+
+### NPM Script:
+
+You can also use the npm script:
+```bash
+npm run convert-font YourFont.ttf 20,40,60
 ```
 
 ### Line Spacing
@@ -289,11 +366,36 @@ Make sure the path in `templateImage` is correct and the file exists.
 Adjust the `startX`, `startY`, and `boxSize` values to match your template's grid layout.
 
 ### "Failed to load custom font" error
-This happens when you try to use a .ttf or .otf font file. Jimp only supports BMFont format (.fnt + .png).
+The generator now auto-converts .ttf fonts, but if you see this error:
 
-**Solution:**
-1. Convert your font to BMFont format using Hiero, BMFont, or an online converter
-2. Or set `"customFont": null` to use the built-in fonts
+**Possible causes:**
+1. Missing dependencies - Run `npm install`
+2. Invalid font file - Check the file path exists
+3. Corrupted font file - Try a different font
+
+**Solutions:**
+1. Make sure dependencies are installed: `npm install`
+2. Let it auto-convert: Use `"customFont": "./fonts/YourFont.ttf"`
+3. Or manually convert: `node convert-font.js YourFont.ttf 60`
+4. Or use built-in fonts: `"customFont": null`
+
+### fontSize config not working
+If changing `fontSize` in your config doesn't change the text size:
+
+**For .fnt files (already converted):**
+The font size is baked into the .fnt file. To use a different size, either:
+- Let the generator auto-convert from .ttf with your desired fontSize
+- Or manually generate a new .fnt at the size you want
+
+**For .ttf files (auto-converted):**
+The `fontSize` config DOES work! Just change it in your config:
+```json
+{
+  "customFont": "./fonts/Poppins.ttf",
+  "fontSize": 70
+}
+```
+The generator will create `Poppins-70.fnt` automatically.
 
 ## License
 

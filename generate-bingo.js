@@ -30,6 +30,14 @@ class BingoGenerator {
     // Debug mode
     this.debug = config.debug || false;
     
+    // Auto-convert TTF fonts if needed
+    this._needsFontConversion = false;
+    this._originalTtfPath = null;
+    if (this.customFont && this.customFont.toLowerCase().endsWith('.ttf')) {
+      this._needsFontConversion = true;
+      this._originalTtfPath = this.customFont;
+    }
+    
     // Validate configuration
     this.validate();
   }
@@ -145,6 +153,16 @@ class BingoGenerator {
     if (this.customFont) {
       try {
         const customFont = await Jimp.loadFont(this.customFont);
+        
+        // Show warning once about fixed size limitation
+        if (!this._customFontSizeWarningShown) {
+          this._customFontSizeWarningShown = true;
+          const actualSize = customFont.common ? customFont.common.lineHeight : 'unknown';
+          console.warn('\n⚠️  Note: Custom BMFont has a fixed size');
+          console.warn(`   Font file size: ${actualSize}px (fontSize config is ignored for custom fonts)`);
+          console.warn(`   To use different sizes, generate multiple .fnt files at different sizes\n`);
+        }
+        
         // Successfully loaded, return it
         return customFont;
       } catch (error) {
@@ -435,9 +453,69 @@ class BingoGenerator {
   }
 
   /**
+   * Auto-convert TTF font to BMFont format if needed
+   */
+  async convertTtfFont() {
+    if (!this._needsFontConversion) {
+      return; // No conversion needed
+    }
+
+    const ttfPath = this._originalTtfPath;
+    const fontName = path.basename(ttfPath, '.ttf');
+    const fontsDir = path.dirname(ttfPath) || './fonts';
+    const targetSize = this.fontSize || 48; // Use configured fontSize or default to 48
+    const fntFileName = `${fontName}-${targetSize}.fnt`;
+    const fntPath = path.join(fontsDir, fntFileName);
+
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('🔄 Auto-converting TTF font to BMFont format...');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`Font: ${ttfPath}`);
+    console.log(`Size: ${targetSize}px`);
+    console.log(`Output: ${fntPath}`);
+    console.log('');
+
+    // Check if already converted
+    if (fs.existsSync(fntPath)) {
+      console.log(`✓ Font already converted: ${fntFileName}`);
+      console.log('  (Delete the .fnt file to force reconversion)');
+      console.log('');
+      this.customFont = fntPath;
+      return;
+    }
+
+    // Import the converter
+    try {
+      const { convertFont } = require('./convert-font.js');
+      
+      // Convert the font
+      await convertFont(ttfPath, fontsDir, [targetSize], fontName);
+      
+      // Update customFont path to use the converted .fnt file
+      this.customFont = fntPath;
+      
+      console.log(`✓ Font converted successfully!`);
+      console.log(`  Using: ${fntFileName}`);
+      console.log('');
+    } catch (error) {
+      console.error('❌ Font conversion failed:', error.message);
+      console.error('');
+      console.error('Options:');
+      console.error('  1. Install dependencies: npm install');
+      console.error('  2. Manually convert using: node convert-font.js ' + ttfPath + ' ' + targetSize);
+      console.error('  3. Use built-in fonts: set "customFont": null in config');
+      console.error('');
+      throw new Error(`Font conversion failed: ${error.message}`);
+    }
+  }
+
+  /**
    * Generate all bingo cards
    */
   async generate() {
+    // Auto-convert TTF font if needed
+    await this.convertTtfFont();
+    
     // Create output directory if it doesn't exist
     if (!fs.existsSync(this.outputDir)) {
       fs.mkdirSync(this.outputDir, { recursive: true });
