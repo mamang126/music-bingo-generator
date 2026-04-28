@@ -5,7 +5,8 @@
     "main": "generate-bingo.js",
     "scripts": {
         "start": "node generate-bingo.js",
-        "test": "node generate-bingo.js --config config.example.json"
+        "test": "node generate-bingo.js --config config.example.json",
+        "test-duplications": "node test-duplications.js out/out.json"
     },
     "keywords": [
         "bingo",

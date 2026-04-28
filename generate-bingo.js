@@ -635,6 +635,16 @@ class BingoGenerator {
       generatedCards.push(cardSongs);
     }
 
+    // Save all cards data to a single JSON file
+    const cardsData = generatedCards.map((songs, index) => ({
+      cardNumber: index + 1,
+      songs: songs
+    }));
+    
+    const jsonPath = path.join(this.outputDir, 'out.json');
+    fs.writeFileSync(jsonPath, JSON.stringify(cardsData, null, 2), 'utf8');
+    console.log(`✓ Saved cards data to: ${jsonPath}`);
+
     console.log('');
     console.log('✓ All bingo cards generated successfully!');
     console.log(`✓ Generated ${generatedCards.length} unique cards`);

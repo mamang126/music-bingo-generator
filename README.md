@@ -130,6 +130,22 @@ npm start
 Check the `out` folder for your generated cards:
 - **Individual cards**: `1.jpg`, `2.jpg`, `3.jpg`, etc.
 - **Combined PDF**: `bingo-cards.pdf` (contains all cards in the configured grid layout)
+- **Card data**: `out.json` (contains all card data in JSON format for testing/verification)
+
+### 5. Test for Duplications (Optional)
+
+You can verify that all generated cards are unique using the test script:
+
+```bash
+node test-duplications.js out/out.json
+```
+
+This script will:
+- ✅ Check that no two cards have the exact same set of songs (regardless of order)
+- ✅ Verify that each card has at least 1 different song from all other cards
+- 📊 Show statistics about song differences between cards
+
+The test considers duplication as order-independent, meaning cards with the same songs in different positions are considered duplicates.
 
 ## How to Determine Grid Position
 
