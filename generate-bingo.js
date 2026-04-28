@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const Jimp = require('jimp');
+const sharp = require('sharp');
 
 /**
  * Music Bingo Generator
@@ -69,6 +70,70 @@ class BingoGenerator {
       console.log(`Note: You have ${totalSongs} songs for ${requiredCells} cells (+${extraSongs} extra songs).`);
       console.log(`This allows for good variety across ${cardsNeeded} cards.`);
     }
+  }
+
+  /**
+   * Create SVG text for rendering with sharp (supports TTF fonts)
+   */
+  createTextSVG(text, fontSize, fontFamily, color, maxWidth, maxHeight) {
+    // Escape special XML characters
+    const escapeXml = (str) => {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+    };
+
+    // Word wrapping
+    const words = text.split(/\s+/);
+    const lines = [];
+    let currentLine = '';
+
+    // Approximate character width (this is rough, but works for most fonts)
+    const charWidth = fontSize * 0.6;
+    const maxCharsPerLine = Math.floor(maxWidth / charWidth);
+
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      if (testLine.length * charWidth <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+
+    // Line height (with spacing)
+    const lineHeight = fontSize + this.lineSpacing;
+    
+    // Truncate lines if they exceed max height
+    const maxLines = Math.floor(maxHeight / lineHeight);
+    if (lines.length > maxLines && maxLines > 0) {
+      lines.splice(maxLines);
+      if (lines.length > 0) {
+        lines[lines.length - 1] = lines[lines.length - 1].substring(0, 30) + '...';
+      }
+    }
+
+    // Calculate total height
+    const totalHeight = lines.length * lineHeight;
+
+    // Build SVG
+    const svgLines = lines.map((line, index) => {
+      const y = (index + 0.8) * lineHeight; // 0.8 for baseline adjustment
+      return `<text x="50%" y="${y}" text-anchor="middle" font-family="${fontFamily}" font-size="${fontSize}" fill="${color}">${escapeXml(line)}</text>`;
+    }).join('\n');
+
+    const svg = `
+      <svg width="${maxWidth}" height="${Math.max(totalHeight, maxHeight)}">
+        ${svgLines}
+      </svg>
+    `;
+
+    return { svg, width: maxWidth, height: totalHeight };
   }
 
   /**
@@ -206,9 +271,76 @@ class BingoGenerator {
   }
 
   /**
+   * Draw TTF text using sharp (supports filled text rendering)
+   */
+  async drawTTFText(image, text, x, y, boxSize) {
+    const maxWidth = boxSize - (this.padding * 2);
+    const maxHeight = boxSize - (this.padding * 2);
+    
+    let fontSize = this.fontSize;
+    const minFontSize = 8;
+    const fontFamily = path.parse(this.customFont).name; // Extract font name from path
+    const color = this.fontColor === 'white' ? '#FFFFFF' : '#000000';
+    
+    // Try to fit text with scaling if needed
+    let svgData = null;
+    let fits = false;
+    
+    if (this.textOverflow === 'scale') {
+      // Scale down until it fits
+      while (fontSize >= minFontSize && !fits) {
+        svgData = this.createTextSVG(text, fontSize, fontFamily, color, maxWidth, maxHeight);
+        
+        // Check if it fits
+        if (svgData.height <= maxHeight) {
+          fits = true;
+        } else {
+          fontSize -= 2; // Reduce by 2px at a time
+        }
+      }
+      
+      // If still doesn't fit, truncate
+      if (!fits) {
+        fontSize = minFontSize;
+        const truncated = text.substring(0, 30) + '...';
+        svgData = this.createTextSVG(truncated, fontSize, fontFamily, color, maxWidth, maxHeight);
+      }
+    } else {
+      svgData = this.createTextSVG(text, fontSize, fontFamily, color, maxWidth, maxHeight);
+    }
+
+    try {
+      // Render SVG to PNG buffer using sharp
+      const textBuffer = await sharp(Buffer.from(svgData.svg))
+        .png()
+        .toBuffer();
+      
+      // Load text image with Jimp
+      const textImage = await Jimp.read(textBuffer);
+      
+      // Calculate centered position
+      const textX = x + this.padding + Math.floor((maxWidth - textImage.bitmap.width) / 2);
+      const textY = y + this.padding + Math.floor((maxHeight - svgData.height) / 2);
+      
+      // Composite text onto main image
+      image.composite(textImage, Math.floor(textX), Math.floor(textY));
+    } catch (error) {
+      console.error(`Error rendering text "${text}":`, error.message);
+      // Fall back to Jimp's built-in font
+      const fallbackFont = await Jimp.loadFont(Jimp.FONT_SANS_32_BLACK);
+      image.print(fallbackFont, x + this.padding, y + this.padding, text, maxWidth);
+    }
+  }
+
+  /**
    * Draw text centered in a box using Jimp
    */
   async drawCenteredText(image, text, x, y, boxSize) {
+    // If using TTF font, use sharp rendering
+    if (this.customFont && this.customFont.toLowerCase().endsWith('.ttf')) {
+      return await this.drawTTFText(image, text, x, y, boxSize);
+    }
+
     const maxWidth = boxSize - (this.padding * 2);
     const maxHeight = boxSize - (this.padding * 2);
     
@@ -460,53 +592,18 @@ class BingoGenerator {
       return; // No conversion needed
     }
 
-    const ttfPath = this._originalTtfPath;
-    const fontName = path.basename(ttfPath, '.ttf');
-    const fontsDir = path.dirname(ttfPath) || './fonts';
-    const targetSize = this.fontSize || 48; // Use configured fontSize or default to 48
-    const fntFileName = `${fontName}-${targetSize}.fnt`;
-    const fntPath = path.join(fontsDir, fntFileName);
-
+    // For TTF fonts, we use sharp's SVG rendering directly
+    // No conversion to BMFont format needed
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🔄 Auto-converting TTF font to BMFont format...');
+    console.log('🔤 Using TTF font with sharp rendering');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`Font: ${ttfPath}`);
-    console.log(`Size: ${targetSize}px`);
-    console.log(`Output: ${fntPath}`);
+    console.log(`Font: ${this._originalTtfPath}`);
+    console.log(`Size: ${this.fontSize}px`);
+    console.log('Rendering: SVG with filled text support');
     console.log('');
-
-    // Check if already converted
-    if (fs.existsSync(fntPath)) {
-      console.log(`✓ Font already converted: ${fntFileName}`);
-      console.log('  (Delete the .fnt file to force reconversion)');
-      console.log('');
-      this.customFont = fntPath;
-      return;
-    }
-
-    // Import the converter
-    try {
-      const { convertFont } = require('./convert-font.js');
-      
-      // Convert the font
-      await convertFont(ttfPath, fontsDir, [targetSize], fontName);
-      
-      // Update customFont path to use the converted .fnt file
-      this.customFont = fntPath;
-      
-      console.log(`✓ Font converted successfully!`);
-      console.log(`  Using: ${fntFileName}`);
-      console.log('');
-    } catch (error) {
-      console.error('❌ Font conversion failed:', error.message);
-      console.error('');
-      console.error('Options:');
-      console.error('  1. Install dependencies: npm install');
-      console.error('  2. Manually convert using: node convert-font.js ' + ttfPath + ' ' + targetSize);
-      console.error('  3. Use built-in fonts: set "customFont": null in config');
-      console.error('');
-      throw new Error(`Font conversion failed: ${error.message}`);
-    }
+    
+    // Keep the TTF path as customFont
+    this.customFont = this._originalTtfPath;
   }
 
   /**
